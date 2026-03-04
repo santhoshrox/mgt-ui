@@ -10,11 +10,14 @@ import {
   Circle,
   ExternalLink,
   Loader2,
+  FileCode2,
+  MessageCircle,
+  Eye,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../context/AuthContext'
 import {
-  searchPRs, fetchPR, fetchPRReviews, fetchCheckRuns,
+  searchPRs, fetchPR, fetchPRReviews, fetchCheckRuns, mergePR,
   repoFromUrl, timeAgo,
   type GHSearchItem, type GHPullRequest, type GHReview, type GHCheckRun,
 } from '../lib/github'
@@ -57,70 +60,84 @@ function ReviewBadge({ reviews }: { reviews: GHReview[] }) {
 
 function PRRow({ pr, repo, selected, onClick }: { pr: GHSearchItem; repo: string; selected: boolean; onClick: () => void }) {
   const merged = !!pr.pull_request?.merged_at
+  const ghUrl = `https://github.com/${repo}/pull/${pr.number}`
   return (
-    <button
-      onClick={onClick}
+    <div
       className={clsx(
-        'w-full text-left px-5 py-4 transition-colors border-b border-gray-800/50',
+        'flex items-start gap-3 px-5 py-4 border-b border-gray-800/50 transition-colors cursor-pointer',
         selected ? 'bg-brand-600/5' : 'hover:bg-gray-800/30'
       )}
+      onClick={onClick}
     >
-      <div className="flex items-start gap-3">
-        <div className="mt-0.5">
-          <PRStatusIcon state={pr.state} draft={pr.draft} merged={merged} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="truncate font-medium text-gray-100">{pr.title}</span>
-            <span className="shrink-0 text-xs text-gray-500">#{pr.number}</span>
-          </div>
-          <div className="mt-1 flex items-center gap-3 text-xs text-gray-500">
-            <span className="flex items-center gap-1">
-              <img src={pr.user.avatar_url} alt={pr.user.login} className="h-4 w-4 rounded-full bg-gray-700" />
-              {pr.user.login}
-            </span>
-            <span>{repo}</span>
-            <span>{timeAgo(pr.updated_at)}</span>
-          </div>
-          {pr.labels.length > 0 && (
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              {pr.labels.slice(0, 4).map(l => (
-                <span
-                  key={l.name}
-                  className="rounded-full px-2 py-0.5 text-xs"
-                  style={{ backgroundColor: `#${l.color}20`, color: `#${l.color}` }}
-                >
-                  {l.name}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-3">
-          {pr.comments > 0 && (
-            <span className="flex items-center gap-1 text-xs text-gray-500">
-              <MessageSquare className="h-3 w-3" /> {pr.comments}
-            </span>
-          )}
-        </div>
+      <div className="mt-0.5">
+        <PRStatusIcon state={pr.state} draft={pr.draft} merged={merged} />
       </div>
-    </button>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="truncate font-medium text-gray-100">{pr.title}</span>
+          <span className="shrink-0 text-xs text-gray-500">#{pr.number}</span>
+        </div>
+        <div className="mt-1 flex items-center gap-3 text-xs text-gray-500">
+          <span className="flex items-center gap-1">
+            <img src={pr.user.avatar_url} alt={pr.user.login} className="h-4 w-4 rounded-full bg-gray-700" />
+            {pr.user.login}
+          </span>
+          <span>{repo}</span>
+          <span>{timeAgo(pr.updated_at)}</span>
+        </div>
+        {pr.labels.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {pr.labels.slice(0, 4).map(l => (
+              <span
+                key={l.name}
+                className="rounded-full px-2 py-0.5 text-xs"
+                style={{ backgroundColor: `#${l.color}20`, color: `#${l.color}` }}
+              >
+                {l.name}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        {pr.comments > 0 && (
+          <span className="flex items-center gap-1 text-xs text-gray-500">
+            <MessageSquare className="h-3 w-3" /> {pr.comments}
+          </span>
+        )}
+        <a
+          href={ghUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={e => e.stopPropagation()}
+          title="Open on GitHub"
+          className="rounded-md p-1.5 text-gray-600 transition-colors hover:bg-gray-800 hover:text-gray-300"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+        </a>
+      </div>
+    </div>
   )
 }
 
-function PRDetail({ pr, repo }: { pr: GHSearchItem; repo: string }) {
+function PRDetail({ pr, repo, onMerged }: { pr: GHSearchItem; repo: string; onMerged?: () => void }) {
   const { token } = useAuth()
   const [full, setFull] = useState<GHPullRequest | null>(null)
   const [reviews, setReviews] = useState<GHReview[]>([])
   const [checks, setChecks] = useState<GHCheckRun[]>([])
   const [loading, setLoading] = useState(true)
+  const [merging, setMerging] = useState(false)
+  const [mergeResult, setMergeResult] = useState<{ ok: boolean; msg: string } | null>(null)
 
   const { owner, repo: repoName } = repoFromUrl(pr.repository_url)
+  const ghUrl = `https://github.com/${repo}/pull/${pr.number}`
+  const merged = !!pr.pull_request?.merged_at
 
   useEffect(() => {
     if (!token) return
     let cancelled = false
     setLoading(true)
+    setMergeResult(null)
     Promise.all([
       fetchPR(token, owner, repoName, pr.number),
       fetchPRReviews(token, owner, repoName, pr.number),
@@ -139,13 +156,31 @@ function PRDetail({ pr, repo }: { pr: GHSearchItem; repo: string }) {
     return () => { cancelled = true }
   }, [token, owner, repoName, pr.number])
 
-  const merged = !!pr.pull_request?.merged_at
-
   function ciSummary() {
     if (checks.length === 0) return 'none'
     if (checks.some(c => c.conclusion === 'failure')) return 'failing'
     if (checks.every(c => c.conclusion === 'success' || c.conclusion === 'skipped')) return 'passing'
     return 'pending'
+  }
+
+  const hasApproval = reviews.some(r => r.state === 'APPROVED')
+  const ciPassing = ciSummary() === 'passing'
+  const canMerge = hasApproval && ciPassing && !merged && pr.state === 'open'
+
+  async function handleMerge(method: 'squash' | 'merge' | 'rebase') {
+    if (!token || merging) return
+    if (!confirm(`Merge PR #${pr.number} via ${method}?`)) return
+    setMerging(true)
+    setMergeResult(null)
+    try {
+      await mergePR(token, owner, repoName, pr.number, method)
+      setMergeResult({ ok: true, msg: 'PR merged successfully!' })
+      onMerged?.()
+    } catch (err) {
+      setMergeResult({ ok: false, msg: err instanceof Error ? err.message : 'Merge failed' })
+    } finally {
+      setMerging(false)
+    }
   }
 
   return (
@@ -156,15 +191,88 @@ function PRDetail({ pr, repo }: { pr: GHSearchItem; repo: string }) {
           <h2 className="text-lg font-semibold text-gray-100">{pr.title}</h2>
           <p className="mt-0.5 text-sm text-gray-400">#{pr.number} · {repo}</p>
         </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
         <a
-          href={`https://github.com/${repo}/pull/${pr.number}`}
+          href={ghUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="rounded-lg border border-gray-700 p-2 text-gray-400 hover:text-white transition-colors"
+          className="inline-flex items-center gap-2 rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-900 transition-colors hover:bg-white"
         >
-          <ExternalLink className="h-4 w-4" />
+          <Eye className="h-4 w-4" />
+          Open on GitHub
         </a>
+        <a
+          href={`${ghUrl}/files`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 rounded-lg border border-gray-700 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:border-gray-500 hover:text-white"
+        >
+          <FileCode2 className="h-4 w-4" />
+          View Files
+        </a>
+        <a
+          href={`${ghUrl}#issuecomment-new`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 rounded-lg border border-gray-700 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:border-gray-500 hover:text-white"
+        >
+          <MessageCircle className="h-4 w-4" />
+          Comment
+        </a>
+        {!merged && pr.state === 'open' && (
+          <a
+            href={`${ghUrl}#partial-pull-merging`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 rounded-lg border border-emerald-700/50 bg-emerald-600/10 px-4 py-2 text-sm font-medium text-emerald-400 transition-colors hover:border-emerald-600 hover:bg-emerald-600/20"
+          >
+            <GitMerge className="h-4 w-4" />
+            Merge on GitHub
+          </a>
+        )}
       </div>
+
+      {canMerge && (
+        <div className="rounded-lg border border-emerald-800/30 bg-emerald-950/30 p-4">
+          <p className="text-xs font-medium text-emerald-400 mb-2.5">This PR is ready to merge — approved with passing CI</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => handleMerge('squash')}
+              disabled={merging}
+              className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-500 disabled:opacity-50"
+            >
+              {merging ? <Loader2 className="h-3 w-3 animate-spin" /> : <GitMerge className="h-3 w-3" />}
+              Squash & Merge
+            </button>
+            <button
+              onClick={() => handleMerge('merge')}
+              disabled={merging}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:border-gray-500 hover:text-white disabled:opacity-50"
+            >
+              Merge Commit
+            </button>
+            <button
+              onClick={() => handleMerge('rebase')}
+              disabled={merging}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:border-gray-500 hover:text-white disabled:opacity-50"
+            >
+              Rebase & Merge
+            </button>
+          </div>
+        </div>
+      )}
+
+      {mergeResult && (
+        <div className={clsx(
+          'flex items-center gap-2 rounded-lg px-4 py-3 text-sm',
+          mergeResult.ok ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
+        )}>
+          {mergeResult.ok ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+          {mergeResult.msg}
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-8">
@@ -459,7 +567,7 @@ export default function InboxPage() {
               ← Back to list
             </button>
           </div>
-          <PRDetail pr={selectedPR.item} repo={selectedPR.repo} />
+          <PRDetail pr={selectedPR.item} repo={selectedPR.repo} onMerged={() => { setSelectedKey(null); load() }} />
         </div>
       ) : (
         <div className="hidden flex-1 items-center justify-center text-gray-600 lg:flex">

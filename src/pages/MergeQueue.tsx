@@ -10,14 +10,15 @@ import {
   Shield,
   Globe,
   Zap,
-  ExternalLink,
   RefreshCw,
   GitMerge,
+  Eye,
+  FileCode2,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../context/AuthContext'
 import {
-  searchPRs, fetchPR, fetchCheckRuns, fetchPRReviews,
+  searchPRs, fetchPR, fetchCheckRuns, fetchPRReviews, mergePR,
   repoFromUrl, timeAgo,
   type GHPullRequest, type GHCheckRun, type GHReview,
 } from '../lib/github'
@@ -51,7 +52,11 @@ function CIJobBadge({ check }: { check: GHCheckRun }) {
   )
 }
 
-function QueueCard({ item, index }: { item: QueueItem; index: number }) {
+function QueueCard({ item, index, onMerged }: { item: QueueItem; index: number; onMerged: () => void }) {
+  const { token } = useAuth()
+  const [merging, setMerging] = useState(false)
+  const [mergeResult, setMergeResult] = useState<{ ok: boolean; msg: string } | null>(null)
+
   const statusColors: Record<string, string> = {
     running: 'border-blue-500/30 bg-blue-500/5',
     waiting: 'border-gray-800 bg-gray-900/50',
@@ -68,6 +73,23 @@ function QueueCard({ item, index }: { item: QueueItem; index: number }) {
 
   const badge = statusBadge[item.status]
   const hasApproval = item.reviews.some(r => r.state === 'APPROVED')
+  const [owner, repoName] = item.repo.split('/')
+
+  async function handleMerge(method: 'squash' | 'merge' | 'rebase') {
+    if (!token || merging) return
+    if (!confirm(`Merge PR #${item.pr.number} via ${method}?`)) return
+    setMerging(true)
+    setMergeResult(null)
+    try {
+      await mergePR(token, owner, repoName, item.pr.number, method)
+      setMergeResult({ ok: true, msg: 'Merged!' })
+      setTimeout(onMerged, 1500)
+    } catch (err) {
+      setMergeResult({ ok: false, msg: err instanceof Error ? err.message : 'Merge failed' })
+    } finally {
+      setMerging(false)
+    }
+  }
 
   return (
     <div
@@ -91,21 +113,13 @@ function QueueCard({ item, index }: { item: QueueItem; index: number }) {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <span className={clsx('rounded-full px-2.5 py-0.5 text-xs font-medium', badge.color)}>
             {badge.label}
           </span>
           {hasApproval && (
             <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-400">Approved</span>
           )}
-          <a
-            href={item.pr.html_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-gray-500 hover:text-gray-300"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-          </a>
         </div>
       </div>
 
@@ -129,6 +143,75 @@ function QueueCard({ item, index }: { item: QueueItem; index: number }) {
           {item.pr.head.ref} <ArrowRight className="h-3 w-3" /> {item.pr.base.ref}
         </span>
         <span className="ml-auto">{timeAgo(item.pr.updated_at)}</span>
+      </div>
+
+      {mergeResult && (
+        <div className={clsx(
+          'mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-xs',
+          mergeResult.ok ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
+        )}>
+          {mergeResult.ok ? <CheckCircle2 className="h-3 w-3" /> : <AlertCircle className="h-3 w-3" />}
+          {mergeResult.msg}
+        </div>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-gray-800/50 pt-4">
+        <a
+          href={item.pr.html_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:border-gray-500 hover:text-white"
+        >
+          <Eye className="h-3.5 w-3.5" />
+          Open on GitHub
+        </a>
+        <a
+          href={`${item.pr.html_url}/files`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:border-gray-500 hover:text-white"
+        >
+          <FileCode2 className="h-3.5 w-3.5" />
+          Files
+        </a>
+        {item.status === 'ready' && !mergeResult?.ok && (
+          <>
+            <div className="h-4 w-px bg-gray-800 mx-1" />
+            <button
+              onClick={() => handleMerge('squash')}
+              disabled={merging}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-500 disabled:opacity-50"
+            >
+              {merging ? <Loader2 className="h-3 w-3 animate-spin" /> : <GitMerge className="h-3 w-3" />}
+              Squash & Merge
+            </button>
+            <button
+              onClick={() => handleMerge('merge')}
+              disabled={merging}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700/50 px-3 py-1.5 text-xs font-medium text-emerald-400 transition-colors hover:border-emerald-600 hover:bg-emerald-600/10 disabled:opacity-50"
+            >
+              Merge Commit
+            </button>
+            <button
+              onClick={() => handleMerge('rebase')}
+              disabled={merging}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700/50 px-3 py-1.5 text-xs font-medium text-emerald-400 transition-colors hover:border-emerald-600 hover:bg-emerald-600/10 disabled:opacity-50"
+            >
+              Rebase
+            </button>
+          </>
+        )}
+        {item.status !== 'ready' && !mergeResult?.ok && (
+          <a
+            href={`${item.pr.html_url}#partial-pull-merging`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700/50 bg-emerald-600/10 px-3 py-1.5 text-xs font-medium text-emerald-400 transition-colors hover:border-emerald-600 hover:bg-emerald-600/20"
+          >
+            <GitMerge className="h-3.5 w-3.5" />
+            Merge on GitHub
+          </a>
+        )}
       </div>
     </div>
   )
@@ -249,7 +332,7 @@ export default function MergeQueuePage() {
       ) : (
         <div className="space-y-4">
           {queue.map((item, i) => (
-            <QueueCard key={item.pr.number} item={item} index={i} />
+            <QueueCard key={item.pr.number} item={item} index={i} onMerged={load} />
           ))}
         </div>
       )}

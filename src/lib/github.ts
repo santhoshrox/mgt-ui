@@ -239,6 +239,32 @@ export async function fetchRepoPRs(
   )
 }
 
+// ── Mutations ─────────────────────────────────────────────────────
+
+export async function mergePR(
+  token: string,
+  owner: string,
+  repo: string,
+  number: number,
+  method: 'merge' | 'squash' | 'rebase' = 'squash',
+): Promise<{ sha: string; merged: boolean; message: string }> {
+  const res = await fetch(`${API}/repos/${owner}/${repo}/pulls/${number}/merge`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'Content-Type': 'application/json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+    body: JSON.stringify({ merge_method: method }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.message || `Merge failed (${res.status})`)
+  }
+  return res.json()
+}
+
 // ── Helpers ────────────────────────────────────────────────────────
 
 export function repoFromUrl(repositoryUrl: string): { owner: string; repo: string } {
