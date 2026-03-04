@@ -10,8 +10,10 @@ import {
   Menu,
   X,
   Terminal,
+  LogOut,
 } from 'lucide-react'
 import clsx from 'clsx'
+import { useAuth } from '../context/AuthContext'
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -24,6 +26,7 @@ const navItems = [
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const { user, logout } = useAuth()
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -72,8 +75,30 @@ export default function Layout() {
           ))}
         </nav>
 
-        <div className="border-t border-gray-800 p-4">
-          <div className="rounded-lg bg-gray-900 p-3">
+        <div className="border-t border-gray-800 p-4 space-y-3">
+          {user && (
+            <div className="flex items-center gap-3 rounded-lg bg-gray-900 p-3">
+              <img
+                src={user.avatar_url}
+                alt={user.login}
+                className="h-8 w-8 rounded-full ring-2 ring-gray-700"
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-gray-200">
+                  {user.name || user.login}
+                </p>
+                <p className="truncate text-xs text-gray-500">@{user.login}</p>
+              </div>
+              <button
+                onClick={logout}
+                title="Sign out"
+                className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-gray-800 hover:text-gray-300"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+          <div className="rounded-lg bg-gray-900/60 p-3">
             <p className="text-xs font-medium text-gray-400">Charcoal CLI</p>
             <p className="mt-1 text-xs text-gray-500">
               Powered by <code className="text-brand-400">gt</code> under the hood
@@ -96,6 +121,13 @@ export default function Layout() {
             </div>
             <span className="font-bold">mgt</span>
           </div>
+          {user && (
+            <img
+              src={user.avatar_url}
+              alt={user.login}
+              className="ml-auto h-7 w-7 rounded-full ring-2 ring-gray-700"
+            />
+          )}
         </header>
 
         <main className="flex-1 overflow-y-auto">
