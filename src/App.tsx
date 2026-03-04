@@ -1,16 +1,48 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
+import { AuthProvider, useAuth } from './context/AuthContext'
 import Layout from './components/Layout'
+import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Stacks from './pages/Stacks'
 import Inbox from './pages/Inbox'
 import AIReviews from './pages/AIReviews'
 import MergeQueue from './pages/MergeQueue'
 import Insights from './pages/Insights'
+import { Loader2 } from 'lucide-react'
 
-export default function App() {
+function AuthGate() {
+  const { token, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-950">
+        <Loader2 className="h-8 w-8 animate-spin text-brand-500" />
+      </div>
+    )
+  }
+
+  if (!token) {
+    return <Navigate to="/login" replace />
+  }
+
+  return <Layout />
+}
+
+function AppRoutes() {
+  const { token, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-950">
+        <Loader2 className="h-8 w-8 animate-spin text-brand-500" />
+      </div>
+    )
+  }
+
   return (
     <Routes>
-      <Route path="/" element={<Layout />}>
+      <Route path="/login" element={token ? <Navigate to="/" replace /> : <Login />} />
+      <Route element={<AuthGate />}>
         <Route index element={<Dashboard />} />
         <Route path="stacks" element={<Stacks />} />
         <Route path="inbox" element={<Inbox />} />
@@ -19,5 +51,13 @@ export default function App() {
         <Route path="insights" element={<Insights />} />
       </Route>
     </Routes>
+  )
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppRoutes />
+    </AuthProvider>
   )
 }
